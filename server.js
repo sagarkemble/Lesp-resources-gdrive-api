@@ -1,6 +1,6 @@
 const express = require("express");
 const multer = require("multer");
-const fs = require("fs");
+const { Readable } = require("stream");
 const cors = require("cors");
 const { google } = require("googleapis");
 require("dotenv").config();
@@ -11,9 +11,10 @@ const PORT = process.env.PORT || 3000;
 app.use(cors());
 app.use(express.json());
 
+// Use in-memory storage for faster uploads
 const upload = multer({
-  dest: "uploads/",
-  limits: { fileSize: 20 * 1024 * 1024 },
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
 });
 
 // OAuth2 setup
@@ -32,7 +33,6 @@ const drive = google.drive({
   auth: oauth2Client,
 });
 
-// Helper ensure folder exists
 async function ensureFolderExists(folderName, parentId) {
   const result = await drive.files.list({
     q: `'${parentId}' in parents and name = '${folderName}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
@@ -58,7 +58,6 @@ async function ensureFolderExists(folderName, parentId) {
   return folder.data.id;
 }
 
-// Helper recursively resolve path
 async function resolveFolderPath(pathString, rootFolderId) {
   const folders = pathString.split("/").filter(Boolean);
   let currentFolderId = rootFolderId;
@@ -70,11 +69,12 @@ async function resolveFolderPath(pathString, rootFolderId) {
   return currentFolderId;
 }
 
-// Upload with path
+// Upload endpoint using memory storage
 app.post("/upload", upload.single("file"), async (req, res) => {
-  const filePath = req.file.path;
+  const fileBuffer = req.file.buffer;
   const fileName = req.file.originalname;
   const targetPath = req.body.path;
+
   if (!targetPath) {
     return res.status(400).json({ error: "No path provided" });
   }
@@ -92,7 +92,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
       },
       media: {
         mimeType: req.file.mimetype,
-        body: fs.createReadStream(filePath),
+        body: Readable.from(fileBuffer),
       },
       fields: "id",
       supportsAllDrives: true,
@@ -108,18 +108,17 @@ app.post("/upload", upload.single("file"), async (req, res) => {
 
     const webViewLink = `https://drive.google.com/file/d/${fileId}/view`;
 
-    fs.unlinkSync(filePath);
-
     res.json({ success: true, fileId, webViewLink });
   } catch (err) {
     console.error("Upload error:", err.message);
-    fs.existsSync(filePath) && fs.unlinkSync(filePath);
     res.status(500).json({ error: err.message });
   }
 });
+
 // Delete file from Google Drive
 app.post("/delete", async (req, res) => {
   const { id } = req.body;
+
   if (!id) {
     return res
       .status(400)
