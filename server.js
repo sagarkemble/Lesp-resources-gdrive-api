@@ -80,10 +80,7 @@ app.post("/upload", upload.single("file"), async (req, res) => {
   }
 
   try {
-    const targetFolderId = await resolveFolderPath(
-      targetPath,
-      process.env.UPLOAD_FOLDER_ID
-    );
+    const targetFolderId = await resolveFolderPath(targetPath, "root");
 
     const response = await drive.files.create({
       requestBody: {
